@@ -1,0 +1,53 @@
+name: Build and Test (.NET & .NET Framework)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        default: "dev"
+        type: choice
+        options: [dev, stage, prod]
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        dotnet-version: [ '6.0.x', '8.0.x' ]
+        include:
+          - dotnet-version: '6.0.x'
+            framework: 'net6.0'
+          - dotnet-version: '8.0.x'
+            framework: 'net8.0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }}
+
+      - name: Restore dependencies
+        run: dotnet restore HomePage/HomePage.csproj
+
+      - name: Build
+        run: dotnet build HomePage/HomePage.csproj --configuration Release --no-restore
+
+      - name: Run Unit Tests
+        run: dotnet test HomePage.Tests/HomePage.Tests.csproj --configuration Release --no-build --verbosity normal
+
+      - name: Publish
+        run: dotnet publish HomePage/HomePage.csproj -c Release -o ./publish
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: homepage-${{ matrix.framework }}
+          path: ./publish
