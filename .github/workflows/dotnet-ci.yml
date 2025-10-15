@@ -1,4 +1,4 @@
-name: Build and Test (Dynamic .NET)
+name: Build, Test & Deploy (Dynamic .NET + Azure)
 
 on:
   push:
@@ -15,7 +15,7 @@ on:
         options: [dev, stage, prod]
 
 jobs:
-  build-test:
+  build-test-deploy:
     runs-on: windows-latest
     steps:
       - name: Checkout source
@@ -26,10 +26,10 @@ jobs:
 
       - name: Detect all projects
         id: detect
+        shell: bash
         run: |
           echo "Detecting projects..."
           mkdir -p project_list
-          # List all csproj files
           find . -name "*.csproj" > project_list/all_projects.txt
 
           dotnet_projects=()
@@ -43,7 +43,6 @@ jobs:
             fi
           done < project_list/all_projects.txt
 
-          # Save environment variables
           echo "DOTNET_PROJECTS=${dotnet_projects[*]}" >> $GITHUB_ENV
           echo "FRAMEWORK_PROJECTS=${framework_projects[*]}" >> $GITHUB_ENV
           echo "Detected .NET projects: ${dotnet_projects[*]}"
@@ -56,6 +55,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore all projects
+        shell: bash
         run: |
           if [ -n "${DOTNET_PROJECTS}" ]; then
             for proj in ${DOTNET_PROJECTS}; do
@@ -72,6 +72,7 @@ jobs:
           fi
 
       - name: Build all projects
+        shell: bash
         run: |
           if [ -n "${DOTNET_PROJECTS}" ]; then
             for proj in ${DOTNET_PROJECTS}; do
@@ -111,18 +112,24 @@ jobs:
           }
 
       - name: Publish all projects
+        shell: bash
         run: |
-          mkdir -p ./publish
+          envName=${{ github.event.inputs.environment }}
+          mkdir -p ./publish/$envName
+
           if [ -n "${DOTNET_PROJECTS}" ]; then
             for proj in ${DOTNET_PROJECTS}; do
-              echo "Publishing $proj"
-              dotnet publish "$proj" -c Release -o ./publish/$(basename $(dirname $proj))
+              projName=$(basename $(dirname $proj))
+              echo "Publishing $proj -> ./publish/$envName/$projName"
+              dotnet publish "$proj" -c Release -o ./publish/$envName/$projName
             done
           fi
 
           if [ -n "${FRAMEWORK_PROJECTS}" ]; then
             for proj in ${FRAMEWORK_PROJECTS}; do
-              outdir=./publish/$(basename $(dirname $proj))
+              projName=$(basename $(dirname $proj))
+              outdir=./publish/$envName/$projName
+              echo "Publishing $proj -> $outdir"
               msbuild "$proj" /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=$outdir
             done
           fi
@@ -130,5 +137,18 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: all-projects
-          path: ./publish
+          name: all-projects-${{ github.event.inputs.environment }}
+          path: ./publish/${{ github.event.inputs.environment }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ secrets["APP_NAME_" + github.event.inputs.environment] }}
+          slot-name: Production
+          publish-profile: ${{ secrets["AZURE_PUBLISH_PROFILE_" + github.event.inputs.environment] }}
+          package: ./publish/${{ github.event.inputs.environment }}/*
