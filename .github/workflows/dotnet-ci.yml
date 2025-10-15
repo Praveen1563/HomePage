@@ -1,4 +1,4 @@
-name: Build and Test (.NET 8)
+name: Build and Test (Dynamic .NET)
 
 on:
   push:
@@ -17,39 +17,118 @@ on:
 jobs:
   build-test:
     runs-on: windows-latest
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Setup NuGet for .NET Framework
+        uses: NuGet/setup-nuget@v1
+
+      - name: Detect all projects
+        id: detect
+        run: |
+          echo "Detecting projects..."
+          mkdir -p project_list
+          # List all csproj files
+          find . -name "*.csproj" > project_list/all_projects.txt
+
+          dotnet_projects=()
+          framework_projects=()
+
+          while IFS= read -r proj; do
+            if grep -q '<TargetFramework>net' "$proj"; then
+              dotnet_projects+=("$proj")
+            else
+              framework_projects+=("$proj")
+            fi
+          done < project_list/all_projects.txt
+
+          # Save environment variables
+          echo "DOTNET_PROJECTS=${dotnet_projects[*]}" >> $GITHUB_ENV
+          echo "FRAMEWORK_PROJECTS=${framework_projects[*]}" >> $GITHUB_ENV
+          echo "Detected .NET projects: ${dotnet_projects[*]}"
+          echo "Detected .NET Framework projects: ${framework_projects[*]}"
+
       - name: Setup .NET 8 SDK
+        if: env.DOTNET_PROJECTS != ''
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Verify .NET installation
-        run: dotnet --info
+      - name: Restore all projects
+        run: |
+          if [ -n "${DOTNET_PROJECTS}" ]; then
+            for proj in ${DOTNET_PROJECTS}; do
+              echo "Restoring $proj"
+              dotnet restore "$proj"
+            done
+          fi
 
-      - name: Restore dependencies
-        run: dotnet restore HomePage/HomePage/HomePage.csproj
+          if [ -n "${FRAMEWORK_PROJECTS}" ]; then
+            for proj in ${FRAMEWORK_PROJECTS}; do
+              echo "Restoring $proj"
+              nuget restore "$proj" -ConfigFile NuGet.Config
+            done
+          fi
 
-      - name: Build project
-        run: dotnet build HomePage/HomePage/HomePage.csproj --configuration Release --no-restore
+      - name: Build all projects
+        run: |
+          if [ -n "${DOTNET_PROJECTS}" ]; then
+            for proj in ${DOTNET_PROJECTS}; do
+              echo "Building $proj"
+              dotnet build "$proj" --configuration Release --no-restore
+            done
+          fi
 
-      - name: Run Unit Tests (if available)
+          if [ -n "${FRAMEWORK_PROJECTS}" ]; then
+            for proj in ${FRAMEWORK_PROJECTS}; do
+              echo "Building $proj"
+              msbuild "$proj" /p:Configuration=Release /p:Platform="Any CPU"
+            done
+          fi
+
+      - name: Run Unit Tests
         shell: pwsh
         run: |
-          if (Test-Path "HomePage.Tests/HomePage.Tests.csproj") {
-            dotnet test HomePage.Tests/HomePage.Tests.csproj --configuration Release --no-build --verbosity normal
-          } else {
-            Write-Host "No test project found — skipping test step."
+          # .NET test projects
+          if ($env:DOTNET_PROJECTS) {
+            foreach ($proj in $env:DOTNET_PROJECTS.Split(' ')) {
+              if ($proj -like "*Tests*") {
+                dotnet test $proj --configuration Release --no-build --verbosity normal
+              }
+            }
           }
 
-      - name: Publish application
-        run: dotnet publish HomePage/HomePage/HomePage.csproj -c Release -o ./publish
+          # .NET Framework test projects
+          if ($env:FRAMEWORK_PROJECTS) {
+            nuget install NUnit.ConsoleRunner -Version 3.13.0 -OutputDirectory packages
+            foreach ($proj in $env:FRAMEWORK_PROJECTS.Split(' ')) {
+              if ($proj -like "*Tests*") {
+                $dllPath = Join-Path -Path (Split-Path $proj -Parent) -ChildPath "bin\Release\" + (Split-Path $proj -LeafBase) + ".dll"
+                packages\NUnit.ConsoleRunner.3.13.0\tools\nunit3-console.exe $dllPath
+              }
+            }
+          }
 
-      - name: Upload build artifact
+      - name: Publish all projects
+        run: |
+          mkdir -p ./publish
+          if [ -n "${DOTNET_PROJECTS}" ]; then
+            for proj in ${DOTNET_PROJECTS}; do
+              echo "Publishing $proj"
+              dotnet publish "$proj" -c Release -o ./publish/$(basename $(dirname $proj))
+            done
+          fi
+
+          if [ -n "${FRAMEWORK_PROJECTS}" ]; then
+            for proj in ${FRAMEWORK_PROJECTS}; do
+              outdir=./publish/$(basename $(dirname $proj))
+              msbuild "$proj" /p:Configuration=Release /p:Platform="Any CPU" /p:OutputPath=$outdir
+            done
+          fi
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: homepage-dotnet8
+          name: all-projects
           path: ./publish
