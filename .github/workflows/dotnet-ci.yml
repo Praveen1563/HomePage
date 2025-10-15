@@ -1,4 +1,4 @@
-name: Build, Test & Deploy (Dynamic .NET + Azure)
+name: Build and Test (Dynamic .NET)
 
 on:
   push:
@@ -15,7 +15,7 @@ on:
         options: [dev, stage, prod]
 
 jobs:
-  build-test-deploy:
+  build-test:
     runs-on: windows-latest
     steps:
       - name: Checkout source
@@ -140,15 +140,16 @@ jobs:
           name: all-projects-${{ github.event.inputs.environment }}
           path: ./publish/${{ github.event.inputs.environment }}
 
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      # --- Azure deployment steps commented out ---
+      # - name: Azure Login
+      #   uses: azure/login@v1
+      #   with:
+      #     creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure App Service
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: ${{ secrets["APP_NAME_" + github.event.inputs.environment] }}
-          slot-name: Production
-          publish-profile: ${{ secrets["AZURE_PUBLISH_PROFILE_" + github.event.inputs.environment] }}
-          package: ./publish/${{ github.event.inputs.environment }}/*
+      # - name: Deploy to Azure App Service
+      #   uses: azure/webapps-deploy@v2
+      #   with:
+      #     app-name: ${{ secrets["APP_NAME_" + github.event.inputs.environment] }}
+      #     slot-name: Production
+      #     publish-profile: ${{ secrets["AZURE_PUBLISH_PROFILE_" + github.event.inputs.environment] }}
+      #     package: ./publish/${{ github.event.inputs.environment }}/*
