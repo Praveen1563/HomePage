@@ -1,0 +1,24 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>@ViewData["Title"] - HomePage</title>
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h2>HomePage App</h2>
+            <nav>
+                <a href="/">Home</a> | <a href="/Home/About">About</a>
+            </nav>
+        </header>
+        <main>
+            @RenderBody()
+        </main>
+        <footer>
+            <p>&copy; @DateTime.Now.Year - HomePage</p>
+        </footer>
+    </div>
+</body>
+</html>
