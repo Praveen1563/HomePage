@@ -1,4 +1,4 @@
-name: Build and Test (.NET & .NET Framework)
+name: Build and Test (.NET 8)
 
 on:
   push:
@@ -17,43 +17,39 @@ on:
 jobs:
   build-test:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        dotnet-version: [ '6.0.x', '8.0.x' ]
-        include:
-          - dotnet-version: '6.0.x'
-            framework: 'net6.0'
-          - dotnet-version: '8.0.x'
-            framework: 'net8.0'
 
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET 8 SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ matrix.dotnet-version }}
+          dotnet-version: '8.0.x'
+
+      - name: Verify .NET installation
+        run: dotnet --info
 
       - name: Restore dependencies
         run: dotnet restore HomePage/HomePage/HomePage.csproj
 
-      - name: Build
+      - name: Build project
         run: dotnet build HomePage/HomePage/HomePage.csproj --configuration Release --no-restore
 
-      - name: Run Unit Tests
+      - name: Run Unit Tests (if available)
+        shell: pwsh
         run: |
-          if [ -d "HomePage.Tests" ]; then
+          if (Test-Path "HomePage.Tests/HomePage.Tests.csproj") {
             dotnet test HomePage.Tests/HomePage.Tests.csproj --configuration Release --no-build --verbosity normal
-          else
-            echo "No test project found. Skipping test step."
-          fi
+          } else {
+            Write-Host "No test project found — skipping test step."
+          }
 
-      - name: Publish
+      - name: Publish application
         run: dotnet publish HomePage/HomePage/HomePage.csproj -c Release -o ./publish
 
-      - name: Upload Artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: homepage-${{ matrix.framework }}
+          name: homepage-dotnet8
           path: ./publish
