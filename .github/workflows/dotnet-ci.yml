@@ -1,4 +1,4 @@
-name: Build and Test (Dynamic .NET)
+name: Build, Test & Publish (Dynamic .NET + E2E Tests)
 
 on:
   push:
@@ -15,15 +15,19 @@ on:
         options: [dev, stage, prod]
 
 jobs:
-  build-test:
+  build-test-publish:
     runs-on: windows-latest
     steps:
+
+      # ---------------- Checkout Source ----------------
       - name: Checkout source
         uses: actions/checkout@v4
 
+      # ---------------- NuGet for .NET Framework ----------------
       - name: Setup NuGet for .NET Framework
         uses: NuGet/setup-nuget@v1
 
+      # ---------------- Detect Projects ----------------
       - name: Detect all projects
         id: detect
         shell: bash
@@ -48,12 +52,14 @@ jobs:
           echo "Detected .NET projects: ${dotnet_projects[*]}"
           echo "Detected .NET Framework projects: ${framework_projects[*]}"
 
+      # ---------------- Setup .NET SDK ----------------
       - name: Setup .NET 8 SDK
         if: env.DOTNET_PROJECTS != ''
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
+      # ---------------- Restore Projects ----------------
       - name: Restore all projects
         shell: bash
         run: |
@@ -71,6 +77,7 @@ jobs:
             done
           fi
 
+      # ---------------- Build Projects ----------------
       - name: Build all projects
         shell: bash
         run: |
@@ -88,14 +95,23 @@ jobs:
             done
           fi
 
-      - name: Run Unit Tests
+      # ---------------- Run Unit / E2E Tests ----------------
+      - name: Run Unit & E2E Tests
         shell: pwsh
         run: |
-          # .NET test projects
+          # Create folder for test results
+          $testResultsDir = "$PWD/TestResults"
+          New-Item -ItemType Directory -Force -Path $testResultsDir
+
+          # .NET Core / .NET 8 test projects
           if ($env:DOTNET_PROJECTS) {
             foreach ($proj in $env:DOTNET_PROJECTS.Split(' ')) {
               if ($proj -like "*Tests*") {
-                dotnet test $proj --configuration Release --no-build --verbosity normal
+                Write-Host "Running dotnet tests: $proj"
+                dotnet test $proj `
+                  --configuration Release `
+                  --no-build `
+                  --logger "trx;LogFileName=$($testResultsDir)/$(Split-Path $proj -LeafBase)-results.trx"
               }
             }
           }
@@ -105,12 +121,31 @@ jobs:
             nuget install NUnit.ConsoleRunner -Version 3.13.0 -OutputDirectory packages
             foreach ($proj in $env:FRAMEWORK_PROJECTS.Split(' ')) {
               if ($proj -like "*Tests*") {
+                Write-Host "Running NUnit tests: $proj"
                 $dllPath = Join-Path -Path (Split-Path $proj -Parent) -ChildPath "bin\Release\" + (Split-Path $proj -LeafBase) + ".dll"
-                packages\NUnit.ConsoleRunner.3.13.0\tools\nunit3-console.exe $dllPath
+                packages\NUnit.ConsoleRunner.3.13.0\tools\nunit3-console.exe $dllPath `
+                  --result="$($testResultsDir)\$(Split-Path $proj -LeafBase)-results.xml;format=nunit2"
               }
             }
           }
 
+      # ---------------- Upload Test Results ----------------
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+
+      # ---------------- Optional: GitHub Checks ----------------
+      - name: Publish Test Results to GitHub
+        uses: dorny/test-reporter@v1
+        with:
+          name: E2E Tests
+          path: TestResults/**/*.trx
+          reporter: dotnet-trx
+          fail-on-error: true
+
+      # ---------------- Publish Projects ----------------
       - name: Publish all projects
         shell: bash
         run: |
@@ -134,13 +169,14 @@ jobs:
             done
           fi
 
+      # ---------------- Upload Build Artifacts ----------------
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: all-projects-${{ github.event.inputs.environment }}
           path: ./publish/${{ github.event.inputs.environment }}
 
-      # --- Azure deployment steps commented out ---
+      # ---------------- Azure Deployment (Commented Out) ----------------
       # - name: Azure Login
       #   uses: azure/login@v1
       #   with:
